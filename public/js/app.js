@@ -69,6 +69,13 @@ var App = {
         else if (tab === 'signup') Auth.showSignup();
         return;
       }
+
+      var methodBtn = e.target.closest('.method-btn[data-method]');
+      if (methodBtn) {
+        e.preventDefault();
+        Auth.showLoginMethod(methodBtn.getAttribute('data-method'));
+        return;
+      }
     });
 
     document.addEventListener('change', function(e) {

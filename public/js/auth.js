@@ -9,6 +9,24 @@ var Auth = {
   pendingPassword: '',
   otpTimer: null,
   otpSeconds: 300,
+  supabase: null,
+
+  initSupabase: function() {
+    if (typeof supabase === 'undefined') return;
+    
+    // Fetch config from backend
+    fetch('/api/auth/config')
+      .then(res => res.json())
+      .then(config => {
+        if (config.supabaseUrl && config.supabaseAnonKey) {
+          Auth.supabase = supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+          console.log('Supabase initialized');
+          // Check for recovery/magic link hash on init
+          Auth.handleSupabaseCallback();
+        }
+      })
+      .catch(err => console.error('Failed to load Supabase config:', err));
+  },
 
   showLogin: function() {
     document.getElementById('login-form').classList.add('active');
@@ -35,16 +53,24 @@ var Auth = {
       btn.classList.toggle('active', btn.getAttribute('data-role') === role);
     });
 
-    var tabSignup = document.getElementById('tab-signup');
-    var authSwitch = document.querySelectorAll('.auth-switch');
+    var methodToggle = document.querySelector('.login-method-toggle');
+    var authDivider = document.querySelector('.auth-divider');
+    var googleBtn = document.querySelector('.google-btn');
 
     if (role === 'admin') {
       if (tabSignup) tabSignup.style.display = 'none';
       authSwitch.forEach(function(el) { el.style.display = 'none'; });
+      if (methodToggle) methodToggle.style.display = 'none';
+      if (authDivider) authDivider.style.display = 'none';
+      if (googleBtn) googleBtn.style.display = 'none';
+      Auth.showLoginMethod('password');
       Auth.showLogin();
     } else {
       if (tabSignup) tabSignup.style.display = '';
       authSwitch.forEach(function(el) { el.style.display = ''; });
+      if (methodToggle) methodToggle.style.display = 'flex';
+      if (authDivider) authDivider.style.display = 'flex';
+      if (googleBtn) googleBtn.style.display = 'flex';
     }
 
     Auth.updateHeadings();
@@ -330,10 +356,128 @@ var Auth = {
   logout: function() {
     localStorage.removeItem('tf_token');
     if (Auth.otpTimer) clearInterval(Auth.otpTimer);
+    
+    // Clear Supabase session if initialized
+    if (Auth.supabase) {
+      Auth.supabase.auth.signOut().catch(err => console.error('Supabase signOut error:', err));
+    }
+
     Auth.selectedRole = 'member';
     Auth.setRole('member');
     Auth.showLogin();
     App.showAuth();
     App.toast('Logged out', 'info');
+  },
+
+  loginWithGoogle: function() {
+    if (!Auth.supabase) {
+      App.toast('Supabase is not initialized. Please try again in a moment.', 'error');
+      return;
+    }
+
+    Auth.supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+  },
+
+  loginWithMagicLink: function(e) {
+    if (e) e.preventDefault();
+    if (!Auth.supabase) {
+      App.toast('Supabase is not initialized.', 'error');
+      return;
+    }
+
+    var email = document.getElementById('magic-email').value;
+    if (!email) {
+      App.toast('Please enter your email address', 'error');
+      return;
+    }
+
+    var btn = document.getElementById('magic-btn');
+    btn.querySelector('.btn-loader').classList.remove('hidden');
+    btn.querySelector('span').textContent = 'Sending...';
+
+    Auth.supabase.auth.signInWithOtp({
+      email: email,
+      options: {
+        emailRedirectTo: window.location.origin
+      }
+    }).then(function(res) {
+      if (res.error) throw res.error;
+      App.toast('Magic link sent! Check your inbox 📧', 'success');
+    }).catch(function(err) {
+      App.toast(err.message, 'error');
+    }).finally(function() {
+      btn.querySelector('.btn-loader').classList.add('hidden');
+      btn.querySelector('span').textContent = 'Send Magic Link ✨';
+    });
+  },
+
+  showLoginMethod: function(method) {
+    var pForm = document.getElementById('password-login-form');
+    var mForm = document.getElementById('magic-link-form');
+    var btns = document.querySelectorAll('.method-btn');
+
+    btns.forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-method') === method);
+    });
+
+    if (method === 'password') {
+      pForm.style.display = 'block';
+      mForm.style.display = 'none';
+    } else {
+      pForm.style.display = 'none';
+      mForm.style.display = 'block';
+    }
+  },
+
+  handleSupabaseCallback: function() {
+    if (!Auth.supabase) return;
+
+    Auth.supabase.auth.onAuthStateChange(function(event, session) {
+      if (event === 'SIGNED_IN' && session) {
+        var token = session.access_token;
+        
+        // Sync with our backend
+        API.post('/api/auth/supabase', { access_token: token })
+          .then(function(data) {
+            localStorage.setItem('tf_token', data.token);
+            App.state.token = data.token;
+            App.state.user = data.user;
+            App.toast('Successfully signed in with Google!', 'success');
+            App.showApp();
+            
+            // Clear supabase session from URL
+            window.history.replaceState({}, document.title, "/");
+          })
+          .catch(function(err) {
+            App.toast(err.message, 'error');
+            Auth.supabase.auth.signOut();
+          });
+      }
+    });
+  },
+
+  fillDemo: function(type) {
+    Auth.showLogin();
+    Auth.showLoginMethod('password');
+    Auth.setRole(type);
+    
+    var email = type === 'admin' ? 'admin@teamflow.com' : 'member@teamflow.com';
+    var pass = type === 'admin' ? 'admin123' : 'member123';
+    
+    document.getElementById('login-email').value = email;
+    document.getElementById('login-password').value = pass;
+    
+    App.toast('Filled ' + type + ' credentials', 'info');
   }
 };
+
+// Initialize Supabase on load
+document.addEventListener('DOMContentLoaded', function() {
+  Auth.initSupabase();
+  Auth.handleSupabaseCallback();
+});

@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { authenticate } = require('../middleware/auth');
 const { generateOTP, sendOTPEmail, storeOTP, verifyOTP, clearOTP } = require('../services/otp');
+const supabase = require('../services/supabase');
 
 const router = express.Router();
 
@@ -190,6 +191,66 @@ router.get('/users', authenticate, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Server error.' });
   }
+});
+
+// POST /api/auth/supabase — Sync Supabase user with local DB
+router.post('/supabase', async (req, res) => {
+  try {
+    const { access_token } = req.body;
+    if (!access_token) {
+      return res.status(400).json({ error: 'Access token is required.' });
+    }
+
+    if (!supabase) {
+      return res.status(500).json({ error: 'Supabase is not configured.' });
+    }
+
+    // 1. Verify token and get user from Supabase
+    const { data: { user: sbUser }, error } = await supabase.auth.getUser(access_token);
+    
+    if (error || !sbUser) {
+      return res.status(401).json({ error: 'Invalid Supabase token.' });
+    }
+
+    // 2. Find or create user in MongoDB
+    let user = await User.findOne({ email: sbUser.email.toLowerCase() });
+    
+    if (!user) {
+      const userCount = await User.countDocuments();
+      user = new User({
+        name: sbUser.user_metadata.full_name || sbUser.user_metadata.name || sbUser.email.split('@')[0],
+        email: sbUser.email.toLowerCase(),
+        password: Math.random().toString(36).slice(-12), // Dummy password for oauth users
+        isAdmin: userCount === 0,
+        avatarColor: '#' + Math.floor(Math.random()*16777215).toString(16) // Random color
+      });
+      await user.save();
+    }
+
+    // 3. Generate local JWT
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      message: 'Supabase login successful!',
+      token,
+      user: user.toJSON()
+    });
+  } catch (error) {
+    console.error('Supabase auth error:', error);
+    res.status(500).json({ error: 'Server error during Supabase sync.' });
+  }
+});
+
+// GET /api/auth/config — Expose Supabase public credentials
+router.get('/config', (req, res) => {
+  res.json({
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY
+  });
 });
 
 module.exports = router;

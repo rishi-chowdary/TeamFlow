@@ -52,6 +52,11 @@ router.get('/', authenticate, async (req, res) => {
 router.post('/', authenticate, async (req, res) => {
   try {
     const { name, description } = req.body;
+    
+    // Only Global Admins can create projects
+    if (!req.user.isAdmin) {
+      return res.status(403).json({ error: 'Only system admins can create new projects.' });
+    }
 
     if (!name || name.trim().length < 2) {
       return res.status(400).json({ error: 'Project name must be at least 2 characters.' });
@@ -102,8 +107,12 @@ router.put('/:projectId', authenticate, requireProjectAdmin(), async (req, res) 
 });
 
 // DELETE /api/projects/:projectId — delete project
-router.delete('/:projectId', authenticate, requireProjectAdmin(), async (req, res) => {
+router.delete('/:projectId', authenticate, async (req, res) => {
   try {
+    // Only Global Admins can delete projects
+    if (!req.user.isAdmin) {
+      return res.status(403).json({ error: 'Only system admins can delete projects.' });
+    }
     // Delete all tasks in the project
     await Task.deleteMany({ project: req.params.projectId });
     await Project.findByIdAndDelete(req.params.projectId);

@@ -48,23 +48,16 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // POST /api/tasks — create task
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, requireProjectAdmin(), async (req, res) => {
   try {
     const { title, description, status, priority, project, assignedTo, dueDate } = req.body;
 
-    if (!title || !project) {
-      return res.status(400).json({ error: 'Title and project are required.' });
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required.' });
     }
 
-    // Verify membership
-    const proj = await Project.findById(project);
-    if (!proj) {
-      return res.status(404).json({ error: 'Project not found.' });
-    }
-    const isMember = proj.members.some(m => m.user.toString() === req.userId.toString());
-    if (!isMember) {
-      return res.status(403).json({ error: 'You are not a member of this project.' });
-    }
+    // Project is already verified and attached to req by requireProjectAdmin
+    const proj = req.project;
 
     const task = new Task({
       title: title.trim(),

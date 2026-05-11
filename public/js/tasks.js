@@ -20,6 +20,14 @@ var Tasks = {
       document.getElementById('tasks-subtitle').textContent = proj.description || 'Kanban board';
       Tasks.project = proj;
       Tasks.updateAssigneeFilter(proj);
+
+      // Check user role in this project
+      var myMember = proj.members.find(m => (m.user._id || m.user) === App.state.user._id);
+      var isProjAdmin = myMember && myMember.role === 'admin';
+      
+      // Hide create button for non-admins
+      var createBtn = document.getElementById('create-task-btn');
+      if (createBtn) createBtn.style.display = isProjAdmin ? '' : 'none';
     }
     document.getElementById('tasks-actions').style.display = 'flex';
 
